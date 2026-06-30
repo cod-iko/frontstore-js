@@ -43,6 +43,10 @@
     stripSelectors: 'img, picture, h1, h2, h3, h4, h5, h6, script, noscript, iframe',
 
     // --- AKORDEON ---
+    // TODO: walidator edytora szablonu zgłasza "div does not have one of the
+    // required classes" dla struktury akordeonu i blokuje zapis. Tymczasowo
+    // renderujemy zwykły div z tekstem (useAccordion=false). Wrócić po debugu.
+    useAccordion: false,
     accordionTitle: 'O twórcy',
     chevronHref: '/assets/img/icons/symbol-defs.svg#icon-chevron-down',
 
@@ -160,6 +164,20 @@
     return p;
   }
 
+  // ---- wersja tymczasowa: zwykły div z tekstem (bez akordeonu) ----
+  // Minimum klas, brak grid__col / module / web-componentów — żeby nie wpaść
+  // w walidator edytora ("div does not have one of the required classes").
+  function buildSimple(contentHtml) {
+    var box = document.createElement('div');
+    box.className = 'kp-producer-about fr-view';
+    box.setAttribute('data-kp-producer-details', '1');
+    box.innerHTML =
+      '<p class="kp-producer-about__title"><strong>' + CONFIG.accordionTitle + '</strong></p>' +
+      '<div class="kp-producer-about__content"></div>';
+    box.querySelector('.kp-producer-about__content').innerHTML = contentHtml;
+    return box;
+  }
+
   // ---- budowa akordeonu (1:1 jak product_description) ----
   function buildAccordion(contentHtml) {
     var headingId = uid('about-heading');
@@ -219,7 +237,8 @@
       idle(function () {
         fetchDescription(href).then(function (contentHtml) {
           if (!contentHtml) { log('brak opisu dla', href); return; }
-          inject(anchor, buildAccordion(contentHtml));
+          var node = CONFIG.useAccordion ? buildAccordion(contentHtml) : buildSimple(contentHtml);
+          inject(anchor, node);
         });
       });
     }
