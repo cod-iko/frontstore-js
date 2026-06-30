@@ -38,8 +38,12 @@
       '.producer-section-description'
     ],
 
-    // --- CZYSZCZENIE opisu: usuń te elementy (+ puste kontenery po nich) ---
-    stripSelectors: 'img, picture, h1, h2, h3, h4, h5, h6, script, noscript, iframe',
+    // --- PRZEBUDOWA opisu: wyciągamy zdjęcie + akapity i składamy własny układ ---
+    // (froalowy flex f-row/f-grid ze strony producenta NIE pasuje do naszego diva)
+    extractPhoto: true,
+    dropSelectors: 'h1,h2,h3,h4,h5,h6,script,noscript,iframe,style',
+    // style zdjęcia producenta (okrągłe — jak klasa "zaokrag" na stronie producenta)
+    photoStyle: 'width:140px;height:140px;object-fit:cover;border-radius:50%;flex:0 0 auto;',
 
     // --- AKORDEON ---
     // TODO: walidator edytora szablonu zgłasza "div does not have one of the
@@ -96,19 +100,42 @@
     catch (e) {}
   }
 
-  // ---- czyszczenie pobranego opisu ----
-  function cleanDescription(srcEl) {
+  // ---- przebudowa opisu: zdjęcie + akapity -> własny układ (bez froala flex) ----
+  function escAttr(s) {
+    return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+  }
+
+  function rebuildDescription(srcEl) {
     var box = document.createElement('div');
     box.innerHTML = srcEl.innerHTML;
 
-    // usuń niechciane elementy (img, nagłówki, skrypty...)
-    box.querySelectorAll(CONFIG.stripSelectors).forEach(function (n) { n.remove(); });
-
-    // usuń atrybuty on* (higiena — źródło to własny sklep, ale na wszelki wypadek)
+    // usuń nagłówki/skrypty + atrybuty on* (higiena)
+    box.querySelectorAll(CONFIG.dropSelectors).forEach(function (n) { n.remove(); });
     box.querySelectorAll('*').forEach(function (el) {
       for (var i = el.attributes.length - 1; i >= 0; i--) {
         if (/^on/i.test(el.attributes[i].name)) el.removeAttribute(el.attributes[i].name);
       }
+    });
+
+    // wyciągnij pierwsze zdjęcie do własnego, kontrolowanego elementu
+    var photoHtml = '';
+    if (CONFIG.extractPhoto) {
+      var img = box.querySelector('img');
+      if (img && img.getAttribute('src')) {
+        photoHtml = '<img class="kp-producer-about__photo" src="' + escAttr(img.getAttribute('src')) +
+          '" alt="' + escAttr(img.getAttribute('alt')) + '" loading="lazy" style="' + CONFIG.photoStyle + '">';
+      }
+    }
+    box.querySelectorAll('img, picture').forEach(function (n) { n.remove(); });
+
+    // zneutralizuj froalowy układ (klasy f-row/f-grid-* + ich inline style),
+    // ale ZACHOWAJ style treści (np. kolor linku) na pozostałych elementach
+    box.querySelectorAll('[class]').forEach(function (el) {
+      var classes = el.className.split(/\s+/);
+      var isLayout = classes.some(function (c) { return /^f-(row|grid)/.test(c); });
+      var kept = classes.filter(function (c) { return c && !/^f-(row|grid)/.test(c); });
+      if (kept.length) el.className = kept.join(' '); else el.removeAttribute('class');
+      if (isLayout) el.removeAttribute('style');
     });
 
     // usuń kontenery, które po czyszczeniu zostały puste (np. kolumna po zdjęciu)
@@ -122,8 +149,13 @@
       });
     }
 
-    var html = box.innerHTML.trim();
-    return html || null;
+    var textHtml = box.innerHTML.trim();
+    if (!photoHtml && !textHtml) return null;
+
+    return '<div class="kp-producer-about__layout" style="display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap;">' +
+             photoHtml +
+             '<div class="kp-producer-about__text" style="flex:1 1 240px;min-width:200px;">' + textHtml + '</div>' +
+           '</div>';
   }
 
   // ---- fetch + ekstrakcja (dedup przez memCache + sessionStorage) ----
@@ -149,7 +181,7 @@
         for (var i = 0; i < CONFIG.descSelectors.length && !el; i++) {
           el = doc.querySelector(CONFIG.descSelectors[i]);
         }
-        var out = el ? cleanDescription(el) : null;
+        var out = el ? rebuildDescription(el) : null;
         ssSet(key, out);
         return out;
       })
