@@ -1,15 +1,8 @@
 /**
- * producer-details.js  v.35
+ * producer-details.js  v.36
  * ---------------------------------------------------------------------------
  * Moduł karty produktu (Shoper, nowy Storefront / SPA, sklep kupujeszpomagasz.pl).
- * Akordeon "O twórcy" z danymi producenta: zdjęcie + nazwa (h3) + opis (p).
- *
- * "Furtka" zamiast api.php/REST:
- *   opis producenta jest renderowany server-side na jego stronie listingu.
- *   Link producenta na karcie (moduł product_producer) prowadzi WPROST na tę
- *   stronę (href, np. "/pawel-sikorski"). Pobieramy ją same-origin fetch-em,
- *   wyciągamy zdjęcie + akapity i składamy własną, prostą strukturę z klasami.
- *   -> bez własnego serwera, CORS, auth, bez product_id i ProductFetcherApi.
+ * Akordeon "Poznaj artystę" z danymi producenta: zdjęcie + nazwa (h3) + opis (p).
  *
  * Render: wypełniamy autoryzowany placeholder <div class="product-producer-desc">.
  * Akordeon budowany 1:1 jak moduł product_description (web-componenty h-accordion*
@@ -52,7 +45,7 @@
 
     // --- AKORDEON ---
     useAccordion: true,
-    accordionTitle: 'O twórcy',
+    accordionTitle: 'Poznaj artystę',
     chevronHref: '/assets/img/icons/symbol-defs.svg#icon-chevron-down',
 
     // --- cache ---
