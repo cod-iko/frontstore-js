@@ -35,7 +35,9 @@
     // --- STRONA PRODUCENTA (selektor opisu, kandydaci) ---
     descSelectors: [
       '[data-module-name="list_producer_description"] .producer-section-description',
-      '.producer-section-description'
+      '.producer-section-description',
+      '[data-module-name="list_producer_description"] .section-description',
+      '.section-description'
     ],
 
     // --- PRZEBUDOWA opisu: wyciągamy zdjęcie + akapity i składamy własny układ ---
@@ -54,13 +56,14 @@
     chevronHref: '/assets/img/icons/symbol-defs.svg#icon-chevron-down',
 
     // --- cache ---
+    cache: false,                 // false na czas debugowania -> fetch ZA KAŻDYM razem
     sessionTtlMs: 12 * 60 * 60 * 1000, // 12h
-    sessionKeyPrefix: 'kp-prod-desc:',
+    sessionKeyPrefix: 'kp-prod-desc:v2:', // bump = unieważnia stary cache
 
     // --- lazy ---
     ioRootMargin: '400px',
 
-    debug: false
+    debug: true
   };
   // ====================================================
 
@@ -131,10 +134,11 @@
     // zneutralizuj froalowy układ (klasy f-row/f-grid-* + ich inline style),
     // ale ZACHOWAJ style treści (np. kolor linku) na pozostałych elementach
     box.querySelectorAll('[class]').forEach(function (el) {
-      var classes = el.className.split(/\s+/);
+      var raw = el.getAttribute('class') || ''; // getAttribute -> bezpieczne dla SVG
+      var classes = raw.split(/\s+/);
       var isLayout = classes.some(function (c) { return /^f-(row|grid)/.test(c); });
       var kept = classes.filter(function (c) { return c && !/^f-(row|grid)/.test(c); });
-      if (kept.length) el.className = kept.join(' '); else el.removeAttribute('class');
+      if (kept.length) el.setAttribute('class', kept.join(' ')); else el.removeAttribute('class');
       if (isLayout) el.removeAttribute('style');
     });
 
@@ -150,6 +154,7 @@
     }
 
     var textHtml = box.innerHTML.trim();
+    log('rebuild: zdjęcie=', !!photoHtml, '| dł. tekstu=', textHtml.length);
     if (!photoHtml && !textHtml) return null;
 
     return '<div class="kp-producer-about__layout" style="display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap;">' +
@@ -162,9 +167,11 @@
   function fetchDescription(href) {
     var key = normalizeKey(href);
 
-    var ss = ssGet(key);
-    if (ss !== undefined) { log('ss hit', key); return Promise.resolve(ss); }
-    if (memCache.has(key)) return memCache.get(key);
+    if (CONFIG.cache) {
+      var ss = ssGet(key);
+      if (ss !== undefined) { log('ss hit', key); return Promise.resolve(ss); }
+      if (memCache.has(key)) return memCache.get(key);
+    }
 
     if (currentAbort) currentAbort.abort();
     currentAbort = ('AbortController' in window) ? new AbortController() : null;
@@ -177,12 +184,14 @@
       .then(function (html) {
         if (!html) return null;
         var doc = new DOMParser().parseFromString(html, 'text/html');
-        var el = null;
+        var el = null, usedSel = '';
         for (var i = 0; i < CONFIG.descSelectors.length && !el; i++) {
           el = doc.querySelector(CONFIG.descSelectors[i]);
+          if (el) usedSel = CONFIG.descSelectors[i];
         }
+        log('selektor opisu:', usedSel || 'BRAK', '| dł. HTML strony:', html.length);
         var out = el ? rebuildDescription(el) : null;
-        ssSet(key, out);
+        if (CONFIG.cache) ssSet(key, out);
         return out;
       })
       .catch(function (e) {
@@ -191,7 +200,7 @@
         return null;
       });
 
-    memCache.set(key, p);
+    if (CONFIG.cache) memCache.set(key, p);
     return p;
   }
 
