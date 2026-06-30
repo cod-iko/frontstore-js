@@ -27,11 +27,10 @@
   // ====================== CONFIG ======================
   var CONFIG = {
     // --- KARTA PRODUKTU ---
+    // placeholder autoryzowany w polu tekstowym — to go WYPEŁNIAMY opisem
+    targetSelector: '.product-producer-desc',
     // link producenta -> href to strona listingu producenta (same-origin)
     producerLinkSelector: '[data-module-name="product_producer"] a.product-producer__link',
-    // kotwica: wstrzykujemy zaraz PO module opisu produktu
-    injectAnchorSelector: '[data-module-name="product_description"]',
-    injectPosition: 'afterend',
 
     // --- STRONA PRODUCENTA (selektor opisu, kandydaci) ---
     descSelectors: [
@@ -164,20 +163,6 @@
     return p;
   }
 
-  // ---- wersja tymczasowa: zwykły div z tekstem (bez akordeonu) ----
-  // Minimum klas, brak grid__col / module / web-componentów — żeby nie wpaść
-  // w walidator edytora ("div does not have one of the required classes").
-  function buildSimple(contentHtml) {
-    var box = document.createElement('div');
-    box.className = 'kp-producer-about fr-view';
-    box.setAttribute('data-kp-producer-details', '1');
-    box.innerHTML =
-      '<p class="kp-producer-about__title"><strong>' + CONFIG.accordionTitle + '</strong></p>' +
-      '<div class="kp-producer-about__content"></div>';
-    box.querySelector('.kp-producer-about__content').innerHTML = contentHtml;
-    return box;
-  }
-
   // ---- budowa akordeonu (1:1 jak product_description) ----
   function buildAccordion(contentHtml) {
     var headingId = uid('about-heading');
@@ -214,20 +199,30 @@
     return module;
   }
 
-  function inject(anchor, node) {
-    var prev = document.querySelector('[data-kp-producer-details]');
-    if (prev) prev.remove();
-    anchor.insertAdjacentElement(CONFIG.injectPosition, node);
+  // ---- wypełnienie placeholdera ----
+  function fill(target, contentHtml) {
+    if (CONFIG.useAccordion) {
+      // wersja akordeonowa (na razie wyłączona) — budowana WEWNĄTRZ targetu
+      target.innerHTML = '';
+      target.appendChild(buildAccordion(contentHtml));
+    } else {
+      target.classList.add('fr-view'); // style froala ze sklepu
+      target.innerHTML = contentHtml;
+    }
   }
 
   // ---- orkiestracja na pojedynczej karcie ----
   function run() {
-    var link = document.querySelector(CONFIG.producerLinkSelector);
-    var anchor = document.querySelector(CONFIG.injectAnchorSelector);
-    if (!link || !anchor) { log('brak linku producenta / kotwicy — pomijam'); return; }
+    var target = document.querySelector(CONFIG.targetSelector);
+    if (!target) { log('brak', CONFIG.targetSelector, '— pomijam'); return; }
 
+    var link = document.querySelector(CONFIG.producerLinkSelector);
+    if (!link) { log('brak linku producenta — pomijam'); return; }
     var href = link.getAttribute('href');
     if (!href) { log('link producenta bez href'); return; }
+
+    var key = normalizeKey(href);
+    if (target.getAttribute('data-kp-filled') === key) return; // już wypełnione tym producentem
 
     var fired = false;
     function fire() {
@@ -237,8 +232,8 @@
       idle(function () {
         fetchDescription(href).then(function (contentHtml) {
           if (!contentHtml) { log('brak opisu dla', href); return; }
-          var node = CONFIG.useAccordion ? buildAccordion(contentHtml) : buildSimple(contentHtml);
-          inject(anchor, node);
+          fill(target, contentHtml);
+          target.setAttribute('data-kp-filled', key);
         });
       });
     }
@@ -247,7 +242,7 @@
       var io = new IntersectionObserver(function (entries) {
         entries.forEach(function (en) { if (en.isIntersecting) { io.disconnect(); fire(); } });
       }, { rootMargin: CONFIG.ioRootMargin });
-      io.observe(anchor);
+      io.observe(target);
     } else {
       fire();
     }
