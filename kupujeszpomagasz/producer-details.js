@@ -2,23 +2,29 @@
  * producer-details.js
  * ---------------------------------------------------------------------------
  * Moduł karty produktu (Shoper, nowy Storefront / SPA, sklep kupujeszpomagasz.pl).
- * Dodaje akordeon "O twórcy" z opisem producenta, zaraz po opisie produktu.
+ * Akordeon "O twórcy" z danymi producenta: zdjęcie + nazwa (h3) + opis (p).
  *
  * "Furtka" zamiast api.php/REST:
  *   opis producenta jest renderowany server-side na jego stronie listingu.
  *   Link producenta na karcie (moduł product_producer) prowadzi WPROST na tę
- *   stronę (href, np. "/pawel-sikorski" — indywidualny lub domyślny URL).
- *   Pobieramy ją same-origin fetch-em i wyciągamy kontener opisu.
+ *   stronę (href, np. "/pawel-sikorski"). Pobieramy ją same-origin fetch-em,
+ *   wyciągamy zdjęcie + akapity i składamy własną, prostą strukturę z klasami.
  *   -> bez własnego serwera, CORS, auth, bez product_id i ProductFetcherApi.
  *
- * Akordeon budujemy 1:1 jak moduł product_description (te same web-componenty
- * h-accordion*, już zarejestrowane na stronie) -> natywne zachowanie toggle.
+ * Render: wypełniamy autoryzowany placeholder <div class="product-producer-desc">.
+ * Akordeon budowany 1:1 jak moduł product_description (web-componenty h-accordion*
+ * już zarejestrowane na stronie) -> natywne zachowanie toggle.
  *
- * Wydajność: fetch NIE jest na ścieżce krytycznej karty. Lazy (IntersectionObserver
- * na module product_description) + cache (Map + sessionStorage TTL) +
- * requestIdleCallback + AbortController.
+ * Wydajność: fetch poza ścieżką krytyczną. Lazy (IntersectionObserver) +
+ * cache (Map + sessionStorage TTL) + requestIdleCallback + AbortController.
  *
- * Ładowany przez inline-snippet (panel) -> jsDelivr.
+ * Klasy do stylowania (CSS po stronie sklepu):
+ *   .kp-producer-about           — kontener treści (ma też fr-view)
+ *   .kp-producer-about__photo    — <img> zdjęcie producenta
+ *   .kp-producer-about__name     — <h3> nazwa producenta
+ *   .kp-producer-about__text     — wrapper opisu
+ *   .kp-producer-about__desc     — <p> akapit opisu
+ *   .kp-producer-about-accordion — wrapper modułu akordeonu
  * ---------------------------------------------------------------------------
  */
 (function () {
@@ -27,9 +33,7 @@
   // ====================== CONFIG ======================
   var CONFIG = {
     // --- KARTA PRODUKTU ---
-    // placeholder autoryzowany w polu tekstowym — to go WYPEŁNIAMY opisem
-    targetSelector: '.product-producer-desc',
-    // link producenta -> href to strona listingu producenta (same-origin)
+    targetSelector: '.product-producer-desc',                  // placeholder do wypełnienia
     producerLinkSelector: '[data-module-name="product_producer"] a.product-producer__link',
 
     // --- STRONA PRODUCENTA (selektor opisu, kandydaci) ---
@@ -40,25 +44,19 @@
       '.section-description'
     ],
 
-    // --- PRZEBUDOWA opisu: wyciągamy zdjęcie + akapity i składamy własny układ ---
-    // (froalowy flex f-row/f-grid ze strony producenta NIE pasuje do naszego diva)
-    extractPhoto: true,
-    dropSelectors: 'h1,h2,h3,h4,h5,h6,script,noscript,iframe,style',
-    // style zdjęcia producenta (okrągłe — jak klasa "zaokrag" na stronie producenta)
-    photoStyle: 'width:140px;height:140px;object-fit:cover;border-radius:50%;flex:0 0 auto;',
+    // --- TREŚĆ ---
+    extractPhoto: true,                          // wyciągnij pierwsze <img> z opisu
+    dropSelectors: 'script,noscript,iframe,style',
 
     // --- AKORDEON ---
-    // TODO: walidator edytora szablonu zgłasza "div does not have one of the
-    // required classes" dla struktury akordeonu i blokuje zapis. Tymczasowo
-    // renderujemy zwykły div z tekstem (useAccordion=false). Wrócić po debugu.
-    useAccordion: false,
+    useAccordion: true,
     accordionTitle: 'O twórcy',
     chevronHref: '/assets/img/icons/symbol-defs.svg#icon-chevron-down',
 
     // --- cache ---
     cache: false,                 // false na czas debugowania -> fetch ZA KAŻDYM razem
     sessionTtlMs: 12 * 60 * 60 * 1000, // 12h
-    sessionKeyPrefix: 'kp-prod-desc:v2:', // bump = unieważnia stary cache
+    sessionKeyPrefix: 'kp-prod-desc:v3:', // bump = unieważnia stary cache
 
     // --- lazy ---
     ioRootMargin: '400px',
@@ -67,7 +65,7 @@
   };
   // ====================================================
 
-  var memCache = new Map();   // href -> Promise<string|null> (oczyszczony HTML opisu)
+  var memCache = new Map();   // href -> Promise<{photo,alt,paragraphs}|null>
   var currentAbort = null;
   var uidSeq = 0;
 
@@ -78,6 +76,10 @@
   function uid(prefix) {
     uidSeq += 1;
     return 'kp-' + prefix + '-' + Date.now().toString(36) + '-' + uidSeq;
+  }
+
+  function esc(s) {
+    return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
   }
 
   function normalizeKey(href) {
@@ -95,24 +97,20 @@
         sessionStorage.removeItem(CONFIG.sessionKeyPrefix + key);
         return undefined;
       }
-      return o.html; // string lub null (null = sprawdzone, brak opisu)
+      return o.data; // obiekt lub null (null = sprawdzone, brak opisu)
     } catch (e) { return undefined; }
   }
-  function ssSet(key, html) {
-    try { sessionStorage.setItem(CONFIG.sessionKeyPrefix + key, JSON.stringify({ t: Date.now(), html: html })); }
+  function ssSet(key, data) {
+    try { sessionStorage.setItem(CONFIG.sessionKeyPrefix + key, JSON.stringify({ t: Date.now(), data: data })); }
     catch (e) {}
   }
 
-  // ---- przebudowa opisu: zdjęcie + akapity -> własny układ (bez froala flex) ----
-  function escAttr(s) {
-    return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
-  }
-
-  function rebuildDescription(srcEl) {
+  // ---- ekstrakcja: zdjęcie + akapity (bez froalowego układu) ----
+  function extract(srcEl) {
     var box = document.createElement('div');
     box.innerHTML = srcEl.innerHTML;
 
-    // usuń nagłówki/skrypty + atrybuty on* (higiena)
+    // higiena: usuń skrypty + atrybuty on*
     box.querySelectorAll(CONFIG.dropSelectors).forEach(function (n) { n.remove(); });
     box.querySelectorAll('*').forEach(function (el) {
       for (var i = el.attributes.length - 1; i >= 0; i--) {
@@ -120,51 +118,48 @@
       }
     });
 
-    // wyciągnij pierwsze zdjęcie do własnego, kontrolowanego elementu
-    var photoHtml = '';
+    // zdjęcie: pierwsze <img>
+    var photo = '', alt = '';
     if (CONFIG.extractPhoto) {
       var img = box.querySelector('img');
-      if (img && img.getAttribute('src')) {
-        photoHtml = '<img class="kp-producer-about__photo" src="' + escAttr(img.getAttribute('src')) +
-          '" alt="' + escAttr(img.getAttribute('alt')) + '" loading="lazy" style="' + CONFIG.photoStyle + '">';
-      }
-    }
-    box.querySelectorAll('img, picture').forEach(function (n) { n.remove(); });
-
-    // zneutralizuj froalowy układ (klasy f-row/f-grid-* + ich inline style),
-    // ale ZACHOWAJ style treści (np. kolor linku) na pozostałych elementach
-    box.querySelectorAll('[class]').forEach(function (el) {
-      var raw = el.getAttribute('class') || ''; // getAttribute -> bezpieczne dla SVG
-      var classes = raw.split(/\s+/);
-      var isLayout = classes.some(function (c) { return /^f-(row|grid)/.test(c); });
-      var kept = classes.filter(function (c) { return c && !/^f-(row|grid)/.test(c); });
-      if (kept.length) el.setAttribute('class', kept.join(' ')); else el.removeAttribute('class');
-      if (isLayout) el.removeAttribute('style');
-    });
-
-    // usuń kontenery, które po czyszczeniu zostały puste (np. kolumna po zdjęciu)
-    var changed = true;
-    while (changed) {
-      changed = false;
-      box.querySelectorAll('div, span, section, figure').forEach(function (el) {
-        if (!el.querySelector('img,picture,svg,video') && el.textContent.replace(/ /g, '').trim() === '') {
-          el.remove(); changed = true;
-        }
-      });
+      if (img && img.getAttribute('src')) { photo = img.getAttribute('src'); alt = img.getAttribute('alt') || ''; }
     }
 
-    var textHtml = box.innerHTML.trim();
-    log('rebuild: zdjęcie=', !!photoHtml, '| dł. tekstu=', textHtml.length);
-    if (!photoHtml && !textHtml) return null;
+    // akapity: wszystkie <p> z treścią; fallback: cały tekst jako jeden akapit
+    var paragraphs = [].slice.call(box.querySelectorAll('p'))
+      .map(function (p) { return p.innerHTML.trim(); })
+      .filter(Boolean);
+    if (!paragraphs.length) {
+      var t = box.textContent.trim();
+      if (t) paragraphs = [t];
+    }
 
-    return '<div class="kp-producer-about__layout" style="display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap;">' +
-             photoHtml +
-             '<div class="kp-producer-about__text" style="flex:1 1 240px;min-width:200px;">' + textHtml + '</div>' +
-           '</div>';
+    log('extract: zdjęcie=', !!photo, '| akapitów=', paragraphs.length);
+    if (!photo && !paragraphs.length) return null;
+    return { photo: photo, alt: alt, paragraphs: paragraphs };
+  }
+
+  // ---- złożenie treści: zdjęcie + nazwa(h3) + akapity(p), same klasy ----
+  function buildContent(name, data) {
+    var html = '<div class="kp-producer-about fr-view">';
+    if (data.photo) {
+      html += '<img class="kp-producer-about__photo" src="' + esc(data.photo) +
+        '" alt="' + esc(data.alt || name) + '" loading="lazy">';
+    }
+    if (name) {
+      html += '<h3 class="kp-producer-about__name">' + esc(name) + '</h3>';
+    }
+    if (data.paragraphs && data.paragraphs.length) {
+      html += '<div class="kp-producer-about__text">';
+      data.paragraphs.forEach(function (p) { html += '<p class="kp-producer-about__desc">' + p + '</p>'; });
+      html += '</div>';
+    }
+    html += '</div>';
+    return html;
   }
 
   // ---- fetch + ekstrakcja (dedup przez memCache + sessionStorage) ----
-  function fetchDescription(href) {
+  function fetchData(href) {
     var key = normalizeKey(href);
 
     if (CONFIG.cache) {
@@ -190,7 +185,7 @@
           if (el) usedSel = CONFIG.descSelectors[i];
         }
         log('selektor opisu:', usedSel || 'BRAK', '| dł. HTML strony:', html.length);
-        var out = el ? rebuildDescription(el) : null;
+        var out = el ? extract(el) : null;
         if (CONFIG.cache) ssSet(key, out);
         return out;
       })
@@ -204,15 +199,14 @@
     return p;
   }
 
-  // ---- budowa akordeonu (1:1 jak product_description) ----
+  // ---- akordeon (1:1 jak product_description) — treść trafia do __inner ----
   function buildAccordion(contentHtml) {
     var headingId = uid('about-heading');
     var togId = uid('about-tog');
     var contId = uid('about-cont');
 
     var module = document.createElement('div');
-    module.className = 'module kp-producer-about';
-    module.setAttribute('data-module-name', 'kp_producer_about');
+    module.className = 'module kp-producer-about-accordion';
     module.setAttribute('data-kp-producer-details', '1');
 
     module.innerHTML =
@@ -221,7 +215,7 @@
           '<h2 class="header_h2 module__header header_underline kp-producer-about__header" id="' + headingId + '">' +
             '<h-accordion-toggler class="accordion__toggler" id="' + togId + '" aria-expanded="false" aria-controls="' + contId + '" aria-disabled="false" role="button" tabindex="0">' +
               '<div class="module__header-title module__header-title_highlight">' +
-                '<span class="module__header-content module__header_highlight">' + CONFIG.accordionTitle + '</span>' +
+                '<span class="module__header-content module__header_highlight">' + esc(CONFIG.accordionTitle) + '</span>' +
               '</div>' +
               '<svg class="icon accordion__toggler-icon" aria-hidden="true">' +
                 '<use href="' + CONFIG.chevronHref + '" xlink:href="' + CONFIG.chevronHref + '"></use>' +
@@ -229,25 +223,21 @@
             '</h-accordion-toggler>' +
           '</h2>' +
           '<h-accordion-content aria-labelledby="' + headingId + '" is-dev-accordion-optimization-flag-enabled="" role="region" style="height: 0px;" id="' + contId + '" labelledby="' + togId + '" class="accordion-toggle-transition-start" hidden>' +
-            '<div class="grid__row grid__row_xs-hcenter">' +
-              '<div class="kp-producer-about__content grid__col grid__col_md-10 fr-view grid-mobile-wrap resetcss"></div>' +
-            '</div>' +
+            '<div class="kp-producer-about__inner"></div>' +
           '</h-accordion-content>' +
         '</h-accordion-group>' +
       '</h-accordion>';
 
-    module.querySelector('.kp-producer-about__content').innerHTML = contentHtml;
+    module.querySelector('.kp-producer-about__inner').innerHTML = contentHtml;
     return module;
   }
 
   // ---- wypełnienie placeholdera ----
   function fill(target, contentHtml) {
     if (CONFIG.useAccordion) {
-      // wersja akordeonowa (na razie wyłączona) — budowana WEWNĄTRZ targetu
       target.innerHTML = '';
       target.appendChild(buildAccordion(contentHtml));
     } else {
-      target.classList.add('fr-view'); // style froala ze sklepu
       target.innerHTML = contentHtml;
     }
   }
@@ -261,6 +251,7 @@
     if (!link) { log('brak linku producenta — pomijam'); return; }
     var href = link.getAttribute('href');
     if (!href) { log('link producenta bez href'); return; }
+    var name = (link.textContent || '').trim();
 
     var key = normalizeKey(href);
     if (target.getAttribute('data-kp-filled') === key) return; // już wypełnione tym producentem
@@ -271,9 +262,9 @@
       fired = true;
       var idle = window.requestIdleCallback || function (cb) { return setTimeout(cb, 1); };
       idle(function () {
-        fetchDescription(href).then(function (contentHtml) {
-          if (!contentHtml) { log('brak opisu dla', href); return; }
-          fill(target, contentHtml);
+        fetchData(href).then(function (data) {
+          if (!data) { log('brak opisu dla', href); return; }
+          fill(target, buildContent(name, data));
           target.setAttribute('data-kp-filled', key);
         });
       });
