@@ -1,5 +1,5 @@
 /**
- * producer-details.js
+ * producer-details.js  v.33
  * ---------------------------------------------------------------------------
  * Moduł karty produktu (Shoper, nowy Storefront / SPA, sklep kupujeszpomagasz.pl).
  * Akordeon "O twórcy" z danymi producenta: zdjęcie + nazwa (h3) + opis (p).
