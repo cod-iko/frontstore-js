@@ -135,13 +135,14 @@
     }
 
     log('extract: zdjęcie=', !!photo, '| akapitów=', paragraphs.length);
-    if (!photo && !paragraphs.length) return null;
+    if (!paragraphs.length) return null; // brak opisu -> akordeonu nie pokazujemy wcale
     return { photo: photo, alt: alt, paragraphs: paragraphs };
   }
 
   // ---- złożenie treści: zdjęcie + nazwa(h3) + akapity(p), same klasy ----
   function buildContent(name, data) {
-    var html = '<div class="kp-producer-about fr-view">';
+    // modyfikator --no-photo: hook CSS na układ bez zdjęcia
+    var html = '<div class="kp-producer-about' + (data.photo ? '' : ' kp-producer-about--no-photo') + '">';
     if (data.photo) {
       html += '<img class="kp-producer-about__photo" src="' + esc(data.photo) +
         '" alt="' + esc(data.alt || name) + '" loading="lazy">';
@@ -199,37 +200,37 @@
     return p;
   }
 
-  // ---- akordeon (1:1 jak product_description) — treść trafia do __inner ----
+  // ---- akordeon 1:1 jak natywny moduł (.module > h-accordion); BEZ drugiego .module ----
   function buildAccordion(contentHtml) {
     var headingId = uid('about-heading');
     var togId = uid('about-tog');
     var contId = uid('about-cont');
 
-    var module = document.createElement('div');
-    module.className = 'module kp-producer-about-accordion';
-    module.setAttribute('data-kp-producer-details', '1');
+    var acc = document.createElement('h-accordion');
+    acc.className = 'accordion kp-producer-about-accordion';
+    acc.setAttribute('role', 'none');
+    acc.setAttribute('data-kp-producer-details', '1');
 
-    module.innerHTML =
-      '<h-accordion class="accordion" role="none">' +
-        '<h-accordion-group role="none">' +
-          '<h2 class="header_h2 module__header header_underline kp-producer-about__header" id="' + headingId + '">' +
-            '<h-accordion-toggler class="accordion__toggler" id="' + togId + '" aria-expanded="false" aria-controls="' + contId + '" aria-disabled="false" role="button" tabindex="0">' +
-              '<div class="module__header-title module__header-title_highlight">' +
-                '<span class="module__header-content module__header_highlight">' + esc(CONFIG.accordionTitle) + '</span>' +
-              '</div>' +
-              '<svg class="icon accordion__toggler-icon" aria-hidden="true">' +
-                '<use href="' + CONFIG.chevronHref + '" xlink:href="' + CONFIG.chevronHref + '"></use>' +
-              '</svg>' +
-            '</h-accordion-toggler>' +
-          '</h2>' +
-          '<h-accordion-content aria-labelledby="' + headingId + '" is-dev-accordion-optimization-flag-enabled="" role="region" style="height: 0px;" id="' + contId + '" labelledby="' + togId + '" class="accordion-toggle-transition-start" hidden>' +
-            '<div class="kp-producer-about__inner"></div>' +
-          '</h-accordion-content>' +
-        '</h-accordion-group>' +
-      '</h-accordion>';
+    acc.innerHTML =
+      '<h-accordion-group role="none">' +
+        '<h2 class="header_h2 module__header header_underline kp-producer-about__header" id="' + headingId + '">' +
+          '<h-accordion-toggler class="accordion__toggler" id="' + togId + '" aria-expanded="false" aria-controls="' + contId + '" aria-disabled="false" role="button" tabindex="0">' +
+            '<div class="module__header-title module__header-title_highlight">' +
+              '<span class="module__header-content module__header_highlight">' + esc(CONFIG.accordionTitle) + '</span>' +
+            '</div>' +
+            '<svg class="icon accordion__toggler-icon" aria-hidden="true">' +
+              '<use href="' + CONFIG.chevronHref + '" xlink:href="' + CONFIG.chevronHref + '"></use>' +
+            '</svg>' +
+          '</h-accordion-toggler>' +
+        '</h2>' +
+        '<h-accordion-content aria-labelledby="' + headingId + '" is-dev-accordion-optimization-flag-enabled="" role="region" style="height: 0px;" id="' + contId + '" labelledby="' + togId + '" class="accordion-toggle-transition-start" hidden>' +
+          '<section class="grid__row grid__row_xs-hcenter">' +
+            '<div class="kp-producer-about__content grid__col grid__col_md-10">' + contentHtml + '</div>' +
+          '</section>' +
+        '</h-accordion-content>' +
+      '</h-accordion-group>';
 
-    module.querySelector('.kp-producer-about__inner').innerHTML = contentHtml;
-    return module;
+    return acc;
   }
 
   // ---- wypełnienie placeholdera ----
