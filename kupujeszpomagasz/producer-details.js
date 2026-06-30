@@ -1,5 +1,5 @@
 /**
- * producer-details.js  v.33
+ * producer-details.js  v.34
  * ---------------------------------------------------------------------------
  * Moduł karty produktu (Shoper, nowy Storefront / SPA, sklep kupujeszpomagasz.pl).
  * Akordeon "O twórcy" z danymi producenta: zdjęcie + nazwa (h3) + opis (p).
@@ -35,6 +35,8 @@
     // --- KARTA PRODUKTU ---
     targetSelector: '.product-producer-desc',                  // placeholder do wypełnienia
     producerLinkSelector: '[data-module-name="product_producer"] a.product-producer__link',
+    // edytor dorzuca placeholderowi te klasy (resetcss psuje marginesy modułów) — zdejmujemy
+    stripTargetClasses: ['resetcss'],
 
     // --- STRONA PRODUCENTA (selektor opisu, kandydaci) ---
     descSelectors: [
@@ -235,6 +237,8 @@
 
   // ---- wypełnienie placeholdera ----
   function fill(target, contentHtml) {
+    // zdejmij klasy dorzucone przez edytor (resetcss -> górny margines na h2)
+    CONFIG.stripTargetClasses.forEach(function (c) { target.classList.remove(c); });
     if (CONFIG.useAccordion) {
       target.innerHTML = '';
       target.appendChild(buildAccordion(contentHtml));
