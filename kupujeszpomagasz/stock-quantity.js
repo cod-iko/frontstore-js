@@ -3,17 +3,15 @@
  * ---------------------------------------------------------------------------
  * Pokazuje DOKŁADNĄ ilość magazynową na karcie produktu (Shoper nowy Storefront / SPA).
  *
- * Źródło danych (client-side, bez REST/proxy):
- *   ProductStock.quantityInWarehouses  (mapa: ID magazynu -> ilość) — suma = łączny stan.
- *   Pobierane z:
- *     1) Message Storage API — ostatni event 'product.stockChanged' (bieżący wariant),
- *     2) fallback: ProductFetcherApi.getProductVariant(productId, { variantOptions: {} }),
- *   oraz aktualizowane na żywo eventem eventBus 'product.stockChanged' (zmiana wariantu).
+ * Źródło (client-side, bez REST/proxy):
+ *   ProductStock.quantityInWarehouses (mapa: ID magazynu -> ilość) — suma = łączny stan.
+ *   ProductFetcherApi jest DYNAMICZNE: najpierw FeatureSystemApi.registerDynamic('ProductFetcher'),
+ *   dopiero potem getApi('ProductFetcherApi') -> getProductVariant(productId, { variantOptions: {} }).
+ *   Aktualizacja na żywo: eventBus 'product.stockChanged'.
+ *   Fallback z DOM: h-input-stepper[max] (gdy stan trackowany, max = dostępna ilość).
  *
- * UWAGA: działa tylko gdy sklep TRZYMA stany magazynowe (magazyn włączony). Jeśli produkt
- * ma nielimitowany stan / brak trackowania — mapa jest pusta i nic nie pokazujemy.
- *
- * Ładowany przez inline-snippet (pole .hidden-script) tylko na karcie produktu.
+ * UWAGA: działa tylko gdy sklep trzyma stany magazynowe. Brak trackowania -> nic nie pokazujemy.
+ * Ładowany przez inline-snippet (.hidden-script) tylko na karcie produktu.
  * ---------------------------------------------------------------------------
  */
 (function () {
@@ -23,24 +21,21 @@
   window.__KP_STOCK_QTY__ = true;
 
   var CONFIG = {
-    // element ze statusem dostępności, do którego dopisujemy liczbę
     hostSelector: '.product-availability__image-and-description strong',
-    // fallback, gdyby <strong> nie było
     hostFallbackSelector: '.product-availability__image-and-description',
-    // źródło product-id na karcie
     productIdSelector: 'product-availability[product-id], [product-id]',
-    // szablon: {qty} = liczba, {unit} = jednostka
+    stepperSelector: 'h-input-stepper[max]',
     template: ' ({qty} {unit})',
     unit: 'szt.',
     markerClass: 'kp-stock-qty',
-    debug: false
+    debug: true
   };
 
   function log() {
     if (CONFIG.debug && window.console) console.log.apply(console, ['[stock-qty]'].concat([].slice.call(arguments)));
   }
 
-  // suma wartości quantityInWarehouses; null gdy brak danych (stan nietrackowany)
+  // suma quantityInWarehouses; null gdy brak danych
   function sumQty(stock) {
     var q = stock && stock.quantityInWarehouses;
     if (!q || typeof q !== 'object') return null;
@@ -51,6 +46,15 @@
     return has ? total : null;
   }
 
+  // fallback: max ze steppera ilości (gdy stan trackowany, max = dostępna ilość)
+  function stepperQty() {
+    var s = document.querySelector(CONFIG.stepperSelector);
+    var m = s && s.getAttribute('max');
+    if (!m) return null;
+    var n = Number(m);
+    return (isFinite(n) && n > 0) ? n : null;
+  }
+
   function getProductId() {
     var el = document.querySelector(CONFIG.productIdSelector);
     var id = el && el.getAttribute('product-id');
@@ -58,13 +62,12 @@
   }
 
   function render(qty) {
-    // usuń poprzednią liczbę (idempotencja, re-render web-componentu)
     var old = document.querySelector('.' + CONFIG.markerClass);
     if (old) old.remove();
-    if (qty === null || qty === undefined) return; // brak danych -> nic
+    if (qty === null || qty === undefined) { log('brak danych o stanie — nie pokazuję'); return; }
 
     var host = document.querySelector(CONFIG.hostSelector) || document.querySelector(CONFIG.hostFallbackSelector);
-    if (!host) { log('brak host-a availability'); return; }
+    if (!host) { log('brak hosta availability'); return; }
 
     var span = document.createElement('span');
     span.className = CONFIG.markerClass;
@@ -73,58 +76,44 @@
     log('render', qty);
   }
 
-  function bodyOf(ev) {
-    return ev && ev.body ? ev.body : ev;
+  function bodyOf(ev) { return ev && ev.body ? ev.body : ev; }
+
+  // ProductFetcher: rejestracja DYNAMICZNA -> getApi (kolejność ma znaczenie!)
+  function getProductFetcher(storefront) {
+    return Promise.resolve()
+      .then(function () {
+        var fs = storefront.getApiSync ? storefront.getApiSync('FeatureSystemApi') : null;
+        if (fs && typeof fs.registerDynamic === 'function') {
+          return fs.registerDynamic('ProductFetcher');
+        }
+      })
+      .then(function () { return storefront.getApi('ProductFetcherApi'); })
+      .catch(function (e) { log('ProductFetcher niedostępne:', e && e.message); return null; });
   }
 
-  // pobierz bieżący ProductStock: najpierw z Message Storage, potem z ProductFetcher
   function currentStock(storefront, productId) {
-    return Promise.resolve()
-      .then(function () { return storefront.getApi('MessageStorageApi'); })
-      .then(function (ms) {
-        if (ms && typeof ms.getChannelMessages === 'function') {
-          var msgs = ms.getChannelMessages('product.stockChanged') || [];
-          if (msgs.length) {
-            var body = bodyOf(msgs[msgs.length - 1]);
-            if (body && body.quantityInWarehouses) return body;
-          }
-        }
-        return null;
-      })
-      .catch(function () { return null; })
-      .then(function (stock) {
-        if (stock) return stock;
-        // fallback: ProductFetcherApi
-        return Promise.resolve(storefront.getApi('ProductFetcherApi'))
-          .then(function (pf) {
-            if (pf) return pf;
-            var fs = storefront.getApiSync ? storefront.getApiSync('FeatureSystemApi') : null;
-            if (fs && typeof fs.registerDynamic === 'function') {
-              return Promise.resolve(fs.registerDynamic('ProductFetcher'))
-                .then(function () { return storefront.getApi('ProductFetcherApi'); });
-            }
-            return null;
-          })
-          .then(function (pf) {
-            if (!pf || !productId) return null;
-            return pf.getProductVariant(productId, { variantOptions: {} });
-          })
-          .catch(function () { return null; });
-      });
+    return getProductFetcher(storefront).then(function (pf) {
+      if (!pf || !productId) return null;
+      return Promise.resolve(pf.getProductVariant(productId, { variantOptions: {} }))
+        .catch(function (e) { log('getProductVariant:', e && e.message); return null; });
+    });
   }
 
   function run(storefront) {
     var pid = getProductId();
     if (!pid) { log('brak product-id — pewnie nie karta produktu'); return; }
-    currentStock(storefront, pid).then(function (stock) { render(sumQty(stock)); });
+    currentStock(storefront, pid).then(function (stock) {
+      var qty = sumQty(stock);
+      if (qty === null) { qty = stepperQty(); if (qty !== null) log('fallback ze steppera:', qty); }
+      render(qty);
+    });
   }
 
   function boot(storefront) {
     try {
-      // aktualizacja na żywo przy zmianie wariantu (po re-renderze web-componentu)
       storefront.eventBus.on('product.stockChanged', function (ev) {
         var qty = sumQty(bodyOf(ev));
-        setTimeout(function () { render(qty); }, 50);
+        setTimeout(function () { render(qty !== null ? qty : stepperQty()); }, 50);
       });
       storefront.eventBus.on('PageManager.rendered', function () {
         setTimeout(function () { run(storefront); }, 200);
