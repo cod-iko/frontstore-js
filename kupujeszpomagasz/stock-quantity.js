@@ -1,5 +1,5 @@
 /**
- * stock-quantity.js
+ * stock-quantity.js v2
  * ---------------------------------------------------------------------------
  * Pokazuje DOKŁADNĄ ilość magazynową na karcie produktu (Shoper nowy Storefront / SPA).
  *
