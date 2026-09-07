@@ -1,5 +1,5 @@
 /**
- * producer-details.js  v.36
+ * producer-details.js  v.37
  * ---------------------------------------------------------------------------
  * Moduł karty produktu (Shoper, nowy Storefront / SPA, sklep kupujeszpomagasz.pl).
  * Akordeon "Poznaj artystę" z danymi producenta: zdjęcie + nazwa (h3) + opis (p).
@@ -45,7 +45,7 @@
 
     // --- AKORDEON ---
     useAccordion: true,
-    accordionTitle: 'Poznaj artystę',
+    accordionTitle: 'Poznaj twórcę',
     chevronHref: '/assets/img/icons/symbol-defs.svg#icon-chevron-down',
 
     // --- cache ---
